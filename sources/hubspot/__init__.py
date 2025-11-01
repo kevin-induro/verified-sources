@@ -65,7 +65,6 @@ from .settings import (
     STAGE_PROPERTY_PREFIX,
     STARTDATE,
     WEB_ANALYTICS_EVENTS_ENDPOINT,
-    HS_TO_DLT_TYPE,
 )
 from .utils import chunk_properties
 
@@ -213,20 +212,12 @@ def crm_object_history(
     props_to_type = fetch_props_with_types(
         object_type, api_key, props_entry, include_custom_props
     )
-    col_type_hints = {
-        prop: _to_dlt_columns_schema({prop: hb_type})
-        for prop, hb_type in props_to_type.items()
-        if hb_type in HS_TO_DLT_TYPE
-    }
-    # We need column hints so that dlt can correctly set data types
-    # This is especially relevant for columns of type "number" in Hubspot
-    # that are returned as strings by the API
     for batch in fetch_property_history(
         CRM_OBJECT_ENDPOINTS[object_type],
         api_key,
         ",".join(sorted(props_to_type.keys())),
     ):
-        yield dlt.mark.with_hints(batch, dlt.mark.make_hints(columns=col_type_hints))
+        yield batch
 
 
 def pivot_stages_properties(
