@@ -11,10 +11,14 @@ from dlt.sources.helpers import requests
 
 from .settings import (
     CRM_ASSOCIATIONS_ENDPOINT,
+    CRM_BATCH_ENDPOINT,
+    CRM_OBJECT_ENDPOINTS,
     CRM_SEARCH_ENDPOINT,
+    LAST_MODIFIED_PROPERTY,
     OBJECT_TYPE_PLURAL,
     HS_TO_DLT_TYPE,
 )
+from .utils import batched
 
 BASE_URL = "https://api.hubapi.com/"
 
@@ -93,6 +97,16 @@ def extract_association_data(
     return values
 
 
+def recently_changed_ids(
+    object_type: str,
+    api_key: str,
+    last_modified: str,
+) -> Iterator[str]:
+    for batch in search_data_since(object_type, api_key, last_modified, []):
+        for a in batch:
+            yield a["id"]
+
+
 def extract_property_history(objects: List[Dict[str, Any]]) -> Iterator[Dict[str, Any]]:
     for item in objects:
         history = item.get("propertiesWithHistory")
@@ -107,55 +121,46 @@ def extract_property_history(objects: List[Dict[str, Any]]) -> Iterator[Dict[str
 
 
 def fetch_property_history(
-    endpoint: str,
+    object_type: str,
     api_key: str,
-    props: str,
+    last_modified: str,
+    props: List[str],
     params: Optional[Dict[str, Any]] = None,
-) -> Iterator[List[Dict[str, Any]]]:
+) -> Iterator[Dict[str, Any]]:
     """Fetch property history from the given CRM endpoint.
 
     Args:
-        endpoint: The endpoint to fetch data from, as a string.
+        object_type (str): The object type for which to fetch data from, as a string.
         api_key: The API key to use for authentication, as a string.
-        props: A comma separated list of properties to retrieve the history for
+        last_modified (str): The date from which to start, as a string in ISO format.
+        props: The list of properties to retrieve the history for
         params: Optional dict of query params to include in the request
 
     Yields:
          List of property history entries (dicts)
     """
-    # Construct the URL and headers for the API request
-    url = get_url(endpoint)
+
+    url = get_url(
+        CRM_BATCH_ENDPOINT.format(crm_endpoint=CRM_OBJECT_ENDPOINTS[object_type])
+    )
     headers = _get_headers(api_key)
-
-    params = dict(params or {})
-    params["propertiesWithHistory"] = props
-    params["limit"] = 50
-    # Make the API request
-    r = requests.get(url, headers=headers, params=params)
-    # Parse the API response and yield the properties of each result
-
-    # Parse the response JSON data
-    _data = r.json()
-    while _data is not None:
+    for ids in batched(
+        recently_changed_ids(object_type, api_key, last_modified),
+        50,
+    ):
+        body = dict(params or {})
+        body["inputs"] = [{"id": i} for i in list(ids)]
+        body["propertiesWithHistory"] = props
+        r = requests.post(url, headers=headers, json=body)
+        _data = r.json()
         if "results" in _data:
-            yield list(extract_property_history(_data["results"]))
-
-        # Follow pagination links if they exist
-        _next = _data.get("paging", {}).get("next", None)
-        if _next:
-            next_url = _next["link"]
-            # Get the next page response
-            r = requests.get(next_url, headers=headers)
-            _data = r.json()
-        else:
-            _data = None
+            yield from extract_property_history(_data["results"])
 
 
 def search_data_since(
-    endpoint: str,
+    object_type: str,
     api_key: str,
     last_modified: str,
-    last_modified_prop: str,
     props: List[str],
     associations: Optional[List[str]] = None,
     context: Optional[Dict[str, Any]] = None,
@@ -166,10 +171,9 @@ def search_data_since(
     point in time based on the provided last modified property.
 
     Args:
-        endpoint (str): The root endpoint to fetch data from, as a string.
+        object_type (str): The object type for which to fetch data from, as a string.
         api_key (str): The API key to use for authentication, as a string.
         last_modified (str): The date from which to start the search, as a string in ISO format.
-        last_modified_prop (str): The property used to check the last modified date against, as a string.
         props: The list of properties to include for the object in the request.
         associations: Optional dict of associations to search for for each object.
         context (Optional[Dict[str, Any]]): Additional data which need to be added in the resulting page.
@@ -190,8 +194,10 @@ def search_data_since(
         are used to pass additional parameters to the request
     """
     # Construct the URL and headers for the API request
+    endpoint = CRM_OBJECT_ENDPOINTS[object_type]
     url = get_url(CRM_SEARCH_ENDPOINT.format(crm_endpoint=endpoint))
     headers = _get_headers(api_key)
+    last_modified_prop = LAST_MODIFIED_PROPERTY[object_type]
     body: Dict[str, Any] = {
         "properties": sorted(props),
         "limit": 200,
@@ -236,10 +242,9 @@ def search_data_since(
             raise SearchOutOfBoundsException
         logger.info(f"Starting new search iteration at {_max_last_modified}")
         yield from search_data_since(
-            endpoint,
+            object_type,
             api_key,
             _max_last_modified,
-            last_modified_prop,
             props,
             associations,
             context,

@@ -22,6 +22,7 @@ CRM_PIPELINES_ENDPOINT = "/crm/v3/pipelines/{objectType}"
 
 CRM_SEARCH_ENDPOINT = "{crm_endpoint}/search"
 CRM_ASSOCIATIONS_ENDPOINT = "{crm_endpoint}/{object_id}/associations/{association}"
+CRM_BATCH_ENDPOINT = "{crm_endpoint}/batch/read"
 
 CRM_OBJECT_ENDPOINTS = {
     "contact": CRM_CONTACTS_ENDPOINT,

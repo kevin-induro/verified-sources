@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterable, Iterator, List, TypeVar
+from itertools import islice
 
 from .settings import PREPROCESSING
 
@@ -27,3 +28,20 @@ def chunk_properties(properties: List[str], max_length: int) -> Iterator[List[st
             length += prop_len
     if chunk:
         yield chunk
+
+
+T = TypeVar("T")
+
+
+# https://docs.python.org/3/library/itertools.html#itertools.batched
+def batched(
+    iterable: Iterable[T], n: int, *, strict: bool = False
+) -> Iterator[tuple[T, ...]]:
+    # batched('ABCDEFG', 2) → AB CD EF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    iterator = iter(iterable)
+    while batch := tuple(islice(iterator, n)):
+        if strict and len(batch) != n:
+            raise ValueError("batched(): incomplete batch")
+        yield batch

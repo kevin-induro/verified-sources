@@ -35,7 +35,8 @@ from urllib.parse import quote
 
 import dlt
 from dlt.common import logger, pendulum
-from dlt.common.typing import TDataItems
+from dlt.common.time import ensure_pendulum_datetime_utc
+from dlt.common.typing import TDataItems, TAnyDateTime
 from dlt.sources import DltResource
 
 from .helpers import (
@@ -110,10 +111,9 @@ def fetch_data_for_properties(
     if last_modified is not None:
         try:
             yield from search_data_since(
-                CRM_OBJECT_ENDPOINTS[object_type],
+                object_type,
                 api_key,
                 last_modified,
-                LAST_MODIFIED_PROPERTY[object_type],
                 props=props,
                 associations=associations,
                 context=context,
@@ -189,6 +189,7 @@ def crm_objects(
 def crm_object_history(
     object_type: str,
     api_key: str,
+    last_modified: dlt.sources.incremental[str],
     props: List[str] = None,
     include_custom_props: bool = True,
 ) -> Iterator[TDataItems]:
@@ -213,9 +214,10 @@ def crm_object_history(
         object_type, api_key, props_entry, include_custom_props
     )
     for batch in fetch_property_history(
-        CRM_OBJECT_ENDPOINTS[object_type],
+        object_type,
         api_key,
-        ",".join(sorted(props_to_type.keys())),
+        last_modified.start_value,
+        list(props_to_type.keys()),
     ):
         yield batch
 
@@ -295,6 +297,7 @@ def hubspot(
     include_history: bool = False,
     soft_delete: bool = False,
     include_custom_props: bool = True,
+    start_date: TAnyDateTime = HUBSPOT_CREATION_DATE,
     properties: Optional[Dict[str, List[str]]] = None,
 ) -> Iterator[DltResource]:
     """
@@ -330,6 +333,7 @@ def hubspot(
         HubSpot CRM API. The API key is passed to `fetch_data` as the
         `api_key` argument.
     """
+    start_date = ensure_pendulum_datetime_utc(start_date or HUBSPOT_CREATION_DATE)
     properties = properties or ENTITY_PROPERTIES
 
     @dlt.resource(name="owners", write_disposition="merge", primary_key="id")
@@ -450,7 +454,7 @@ def hubspot(
             props=properties.get(obj),
             last_modified=dlt.sources.incremental(
                 LAST_MODIFIED_PROPERTY[obj],
-                initial_value=HUBSPOT_CREATION_DATE.isoformat(),
+                initial_value=start_date.isoformat(),
             ),
             include_custom_props=include_custom_props,
             archived=soft_delete,
@@ -466,6 +470,10 @@ def hubspot(
             )(
                 object_type=obj,
                 api_key=api_key,
+                last_modified=dlt.sources.incremental(
+                    "timestamp",
+                    initial_value=start_date.isoformat(),
+                ),
                 props=properties.get(obj),
                 include_custom_props=include_custom_props,
             )
