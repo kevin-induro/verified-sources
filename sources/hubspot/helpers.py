@@ -102,7 +102,7 @@ def recently_changed_ids(
     api_key: str,
     last_modified: str,
 ) -> Iterator[str]:
-    for batch in search_data_since(object_type, api_key, last_modified, []):
+    for batch in search_data_since(object_type, api_key, last_modified, props=[]):
         for a in batch:
             yield a["id"]
 
@@ -161,6 +161,8 @@ def search_data_since(
     object_type: str,
     api_key: str,
     last_modified: str,
+    last_id: int = 0,
+    *,
     props: List[str],
     associations: Optional[List[str]] = None,
     context: Optional[Dict[str, Any]] = None,
@@ -174,6 +176,7 @@ def search_data_since(
         object_type (str): The object type for which to fetch data from, as a string.
         api_key (str): The API key to use for authentication, as a string.
         last_modified (str): The date from which to start the search, as a string in ISO format.
+        last_id (int): The last ID found in the previous search, defaults to zero for a new search.
         props: The list of properties to include for the object in the request.
         associations: Optional dict of associations to search for for each object.
         context (Optional[Dict[str, Any]]): Additional data which need to be added in the resulting page.
@@ -208,11 +211,16 @@ def search_data_since(
                         "propertyName": last_modified_prop,
                         "operator": "GTE",
                         "value": last_modified,
-                    }
+                    },
+                    {
+                        "propertyName": "hs_object_id",
+                        "operator": "GT",
+                        "value": last_id,
+                    },
                 ]
             }
         ],
-        "sorts": [{"propertyName": last_modified_prop, "direction": "ASCENDING"}],
+        "sorts": [{"propertyName": "hs_object_id", "direction": "ASCENDING"}],
     }
 
     # Make the API request
@@ -222,14 +230,13 @@ def search_data_since(
     _data = r.json()
 
     _total = _data.get("total", 0)
-    logger.info(f"Getting {_total} new objects from {url} starting at {last_modified}")
-    _max_last_modified = last_modified
+    logger.info(f"Getting {_total} new objects from {url} starting at {last_id}")
+    _next_last_id = last_id
     # Yield the properties of each result in the API response
     while _data is not None:
         if "results" in _data:
             for _result in _data["results"]:
-                if _result["updatedAt"]:
-                    _max_last_modified = max(_max_last_modified, _result["updatedAt"])
+                _next_last_id = max(_next_last_id, int(_result["id"]))
             yield _data_to_objects(
                 _data, endpoint, headers, associations=associations, context=context
             )
@@ -238,16 +245,17 @@ def search_data_since(
         _data = search_pagination(url, _data, headers, body)
 
     if _total > 9999:
-        if _max_last_modified == last_modified:
+        if _next_last_id == last_id:
             raise SearchOutOfBoundsException
-        logger.info(f"Starting new search iteration at {_max_last_modified}")
+        logger.info(f"Starting new search iteration at {_next_last_id}")
         yield from search_data_since(
             object_type,
             api_key,
-            _max_last_modified,
-            props,
-            associations,
-            context,
+            last_modified,
+            _next_last_id,
+            props=props,
+            associations=associations,
+            context=context,
         )
 
 
