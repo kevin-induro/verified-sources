@@ -62,6 +62,7 @@ from .settings import (
     OBJECT_TYPE_SINGULAR,
     PIPELINES_OBJECTS,
     PROPERTIES_WITH_CUSTOM_LABELS,
+    PROPERTY_HISTORY_TYPES,
     SOFT_DELETE_KEY,
     STAGE_PROPERTY_PREFIX,
     STARTDATE,
@@ -209,17 +210,20 @@ def crm_object_history(
     # Fetch the properties from ENTITY_PROPERTIES or default to "All"
     props_entry: List[str] = props or ENTITY_PROPERTIES.get(object_type, [])
 
-    # Fetch the properties with the option to include custom properties
-    props_to_type = fetch_props_with_types(
-        object_type, api_key, props_entry, include_custom_props
-    )
+    col_type_hints = {
+        prop: _to_dlt_columns_schema({prop: hb_type})
+        for prop, hb_type in PROPERTY_HISTORY_TYPES.items()
+    }
+    # We need column hints so that dlt can correctly set data types
+    # This is especially relevant for columns of type "number" in Hubspot
+    # that are returned as strings by the API
     for batch in fetch_property_history(
         object_type,
         api_key,
         last_modified.start_value,
-        list(props_to_type.keys()),
+        props_entry,
     ):
-        yield batch
+        yield dlt.mark.with_hints(batch, dlt.mark.make_hints(columns=col_type_hints))
 
 
 def pivot_stages_properties(

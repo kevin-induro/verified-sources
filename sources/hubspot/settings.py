@@ -199,3 +199,13 @@ HS_TO_DLT_TYPE: Dict[str, TDataType] = {
     "datetime": "timestamp",
     "string": "text",
 }
+
+PROPERTY_HISTORY_TYPES: Dict[str, str] = {
+    "object_id": "string",
+    "property_name": "string",
+    "value": "string",
+    "timestamp": "datetime",
+    "source_type": "string",
+    "source_id": "string",
+    "updated_by_user_id": "number",
+}
